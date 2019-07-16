@@ -7,7 +7,294 @@ use crate::predicates::is_signed_int;
 use crate::regalloc::RegDiversions;
 use core::u32;
 
-include!(concat!(env!("OUT_DIR"), "/binemit-riscv.rs"));
+/// Emit binary machine code for `inst` for the riscv ISA.
+#[allow(unused_variables, unreachable_code)]
+pub fn emit_inst<CS: CodeSink + ?Sized>(
+    func: &Function,
+    inst: Inst,
+    divert: &mut RegDiversions,
+    sink: &mut CS,
+) {
+    let encoding = func.encodings[inst];
+    let bits = encoding.bits();
+    match func.encodings[inst].recipe() {
+        // Recipe R
+        0 => {
+            if let InstructionData::Binary {
+                opcode, ref args, ..
+            } = func.dfg[inst]
+            {
+                let in_reg0 = divert.reg(args[0], &func.locations);
+                let in_reg1 = divert.reg(args[1], &func.locations);
+                let results = [func.dfg.first_result(inst)];
+                let out_reg0 = divert.reg(results[0], &func.locations);
+                put_r(bits, in_reg0, in_reg1, out_reg0, sink);
+                return;
+            }
+        }
+        // Recipe Rshamt
+        1 => {
+            if let InstructionData::BinaryImm {
+                opcode, imm, arg, ..
+            } = func.dfg[inst]
+            {
+                let args = [arg];
+                let in_reg0 = divert.reg(args[0], &func.locations);
+                let results = [func.dfg.first_result(inst)];
+                let out_reg0 = divert.reg(results[0], &func.locations);
+                put_rshamt(bits, in_reg0, imm.into(), out_reg0, sink);
+                return;
+            }
+        }
+        // Recipe Ricmp
+        2 => {
+            if let InstructionData::IntCompare {
+                opcode,
+                cond,
+                ref args,
+                ..
+            } = func.dfg[inst]
+            {
+                let in_reg0 = divert.reg(args[0], &func.locations);
+                let in_reg1 = divert.reg(args[1], &func.locations);
+                let results = [func.dfg.first_result(inst)];
+                let out_reg0 = divert.reg(results[0], &func.locations);
+                put_r(bits, in_reg0, in_reg1, out_reg0, sink);
+                return;
+            }
+        }
+        // Recipe Ii
+        3 => {
+            if let InstructionData::BinaryImm {
+                opcode, imm, arg, ..
+            } = func.dfg[inst]
+            {
+                let args = [arg];
+                let in_reg0 = divert.reg(args[0], &func.locations);
+                let results = [func.dfg.first_result(inst)];
+                let out_reg0 = divert.reg(results[0], &func.locations);
+                put_i(bits, in_reg0, imm.into(), out_reg0, sink);
+                return;
+            }
+        }
+        // Recipe Iz
+        4 => {
+            if let InstructionData::UnaryImm { opcode, imm, .. } = func.dfg[inst] {
+                let results = [func.dfg.first_result(inst)];
+                let out_reg0 = divert.reg(results[0], &func.locations);
+                put_i(bits, 0, imm.into(), out_reg0, sink);
+                return;
+            }
+        }
+        // Recipe Iicmp
+        5 => {
+            if let InstructionData::IntCompareImm {
+                opcode,
+                cond,
+                imm,
+                arg,
+                ..
+            } = func.dfg[inst]
+            {
+                let args = [arg];
+                let in_reg0 = divert.reg(args[0], &func.locations);
+                let results = [func.dfg.first_result(inst)];
+                let out_reg0 = divert.reg(results[0], &func.locations);
+                put_i(bits, in_reg0, imm.into(), out_reg0, sink);
+                return;
+            }
+        }
+        // Recipe Iret
+        6 => {
+            if let InstructionData::MultiAry { opcode, .. } = func.dfg[inst] {
+                // Return instructions are always a jalr to %x1.
+                // The return address is provided as a special-purpose link argument.
+                put_i(
+                    bits, 1, // rs1 = %x1
+                    0, // no offset.
+                    0, // rd = %x0: no address written.
+                    sink,
+                );
+                return;
+            }
+        }
+        // Recipe Icall
+        7 => {
+            if let InstructionData::CallIndirect {
+                opcode,
+                sig_ref,
+                ref args,
+                ..
+            } = func.dfg[inst]
+            {
+                let args = args.as_slice(&func.dfg.value_lists);
+                let in_reg0 = divert.reg(args[0], &func.locations);
+                // call_indirect instructions are jalr with rd=%x1.
+                put_i(
+                    bits, in_reg0, 0, // no offset.
+                    1, // rd = %x1: link register.
+                    sink,
+                );
+                return;
+            }
+        }
+        // Recipe Icopy
+        8 => {
+            if let InstructionData::Unary { opcode, arg, .. } = func.dfg[inst] {
+                let args = [arg];
+                let in_reg0 = divert.reg(args[0], &func.locations);
+                let results = [func.dfg.first_result(inst)];
+                let out_reg0 = divert.reg(results[0], &func.locations);
+                put_i(bits, in_reg0, 0, out_reg0, sink);
+                return;
+            }
+        }
+        // Recipe Irmov
+        9 => {
+            if let InstructionData::RegMove {
+                opcode,
+                src,
+                dst,
+                arg,
+                ..
+            } = func.dfg[inst]
+            {
+                divert.regmove(arg, src, dst);
+                put_i(bits, src, 0, dst, sink);
+                return;
+            }
+        }
+        // Recipe U
+        10 => {
+            if let InstructionData::UnaryImm { opcode, imm, .. } = func.dfg[inst] {
+                let results = [func.dfg.first_result(inst)];
+                let out_reg0 = divert.reg(results[0], &func.locations);
+                put_u(bits, imm.into(), out_reg0, sink);
+                return;
+            }
+        }
+        // Recipe UJ
+        11 => {
+            if let InstructionData::Jump {
+                opcode,
+                destination,
+                ..
+            } = func.dfg[inst]
+            {
+                let dest = i64::from(func.offsets[destination]);
+                let disp = dest - i64::from(sink.offset());
+                put_uj(bits, disp, 0, sink);
+                return;
+            }
+        }
+        // Recipe UJcall
+        12 => {
+            if let InstructionData::Call {
+                opcode, func_ref, ..
+            } = func.dfg[inst]
+            {
+                sink.reloc_external(Reloc::RiscvCall, &func.dfg.ext_funcs[func_ref].name, 0);
+                // rd=%x1 is the standard link register.
+                put_uj(bits, 0, 1, sink);
+                return;
+            }
+        }
+        // Recipe SB
+        13 => {
+            if let InstructionData::BranchIcmp {
+                opcode,
+                cond,
+                destination,
+                ref args,
+                ..
+            } = func.dfg[inst]
+            {
+                let args = args.as_slice(&func.dfg.value_lists);
+                let in_reg0 = divert.reg(args[0], &func.locations);
+                let in_reg1 = divert.reg(args[1], &func.locations);
+                let dest = i64::from(func.offsets[destination]);
+                let disp = dest - i64::from(sink.offset());
+                put_sb(bits, disp, in_reg0, in_reg1, sink);
+                return;
+            }
+        }
+        // Recipe SBzero
+        14 => {
+            if let InstructionData::Branch {
+                opcode,
+                destination,
+                ref args,
+                ..
+            } = func.dfg[inst]
+            {
+                let args = args.as_slice(&func.dfg.value_lists);
+                let in_reg0 = divert.reg(args[0], &func.locations);
+                let dest = i64::from(func.offsets[destination]);
+                let disp = dest - i64::from(sink.offset());
+                put_sb(bits, disp, in_reg0, 0, sink);
+                return;
+            }
+        }
+        // Recipe GPsp
+        15 => {
+            if let InstructionData::Unary { opcode, arg, .. } = func.dfg[inst] {
+                let args = [arg];
+                let in_reg0 = divert.reg(args[0], &func.locations);
+                let results = [func.dfg.first_result(inst)];
+                let out_stk0 = StackRef::masked(
+                    divert.stack(results[0], &func.locations),
+                    StackBaseMask(1),
+                    &func.stack_slots,
+                )
+                .unwrap();
+                unimplemented!();
+                return;
+            }
+        }
+        // Recipe GPfi
+        16 => {
+            if let InstructionData::Unary { opcode, arg, .. } = func.dfg[inst] {
+                let args = [arg];
+                let in_stk0 = StackRef::masked(
+                    divert.stack(args[0], &func.locations),
+                    StackBaseMask(1),
+                    &func.stack_slots,
+                )
+                .unwrap();
+                let results = [func.dfg.first_result(inst)];
+                let out_reg0 = divert.reg(results[0], &func.locations);
+                unimplemented!();
+                return;
+            }
+        }
+        // Recipe stacknull
+        17 => {
+            if let InstructionData::Unary { opcode, arg, .. } = func.dfg[inst] {
+                let args = [arg];
+                let in_stk0 = StackRef::masked(
+                    divert.stack(args[0], &func.locations),
+                    StackBaseMask(1),
+                    &func.stack_slots,
+                )
+                .unwrap();
+                let results = [func.dfg.first_result(inst)];
+                let out_stk0 = StackRef::masked(
+                    divert.stack(results[0], &func.locations),
+                    StackBaseMask(1),
+                    &func.stack_slots,
+                )
+                .unwrap();
+                return;
+            }
+        }
+        _ => {}
+    }
+    if encoding.is_legal() {
+        bad_encoding(func, inst);
+    }
+}
+
+//clude!(concat!(env!("OUT_DIR"), "/binemit-riscv.rs"));
 
 /// R-type instructions.
 ///
