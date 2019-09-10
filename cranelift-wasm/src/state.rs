@@ -37,7 +37,7 @@ pub enum ControlStackFrame {
     },
     Loop {
         destination: Ebb,
-        header: Ebb,
+        header: Ebb, // loop body
         num_return_values: usize,
         original_stack_size: usize,
     },

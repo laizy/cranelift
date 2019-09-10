@@ -13,6 +13,13 @@ use target_lexicon::triple;
 use wabt::wat2wasm;
 
 #[test]
+fn testrans() {
+    let path = Path::new("../wasmtests/arith.wat");
+    let flags = Flags::new(settings::builder());
+    handle_module(&path, &flags, ReturnMode::NormalReturns);
+}
+
+#[test]
 fn testsuite() {
     let mut paths: Vec<_> = fs::read_dir("../wasmtests")
         .unwrap()
@@ -71,13 +78,15 @@ fn handle_module(path: &Path, flags: &Flags, return_mode: ReturnMode) {
             None | Some(&_) => panic!("the file extension for {:?} is not wasm or wat", path),
         },
     };
-    let triple = triple!("riscv64");
+//    let triple = triple!("riscv64");
+    let triple = triple!("x86_64");
     let isa = isa::lookup(triple).unwrap().finish(flags.clone());
     let mut dummy_environ = DummyEnvironment::new(isa.frontend_config(), return_mode, false);
 
     translate_module(&data, &mut dummy_environ).unwrap();
 
     for func in dummy_environ.info.function_bodies.values() {
+        println!("path:{:?}, func:{}", path, func);
         verifier::verify_function(func, &*isa)
             .map_err(|errors| panic!(pretty_verifier_error(func, Some(&*isa), None, errors)))
             .unwrap();

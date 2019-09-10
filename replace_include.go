@@ -27,7 +27,7 @@ func replace(file string) {
 		}
 		rep := content[pos+len(pat):]
 		sp := strings.Split(rep, "\"")
-		replaceFile := "./target/debug/build/cranelift-codegen-db86ecb971051c18/out/" + sp[0]
+		replaceFile := "./target/debug/build/cranelift-codegen-ba4dc72176f6ae31/out/" + sp[0]
 
 		replace, err := ioutil.ReadFile(replaceFile)
 		if err != nil {
